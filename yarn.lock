@@ -744,6 +744,11 @@
     "@eslint/core" "^0.17.0"
     levn "^0.4.1"
 
+"@google/generative-ai@^0.24.1":
+  version "0.24.1"
+  resolved "https://registry.yarnpkg.com/@google/generative-ai/-/generative-ai-0.24.1.tgz#634a3c06f8ea7a6125c1b0d6c1e66bb11afb52c9"
+  integrity sha512-MqO+MLfM6kjxcKoy0p1wRzG3b4ZZXtPI+z2IE26UogS2Cm/XHO+7gGRBh6gcJsOiIVoH93UwKvW4HdgiOZCy9Q==
+
 "@humanfs/core@^0.19.2":
   version "0.19.2"
   resolved "https://registry.yarnpkg.com/@humanfs/core/-/core-0.19.2.tgz#a8272ca03b2acf492670222b2320b6c421bfde60"
@@ -2111,6 +2116,13 @@ expand-template@^2.0.3:
   resolved "https://registry.yarnpkg.com/expand-template/-/expand-template-2.0.3.tgz#6e14b3fcee0f3a6340ecb57d2e8918692052a47c"
   integrity sha512-XYfuKMvj4O35f/pOXLObndIRvyQ+/+6AhODh+OKWj9S9498pHHn/IMszH+gt0fBCRWMNfk1ZSp5x3AifmnI2vg==
 
+fast-check@^4.8.0:
+  version "4.8.0"
+  resolved "https://registry.yarnpkg.com/fast-check/-/fast-check-4.8.0.tgz#75687d3c8059441fee4a58a8acc9be09b85aff78"
+  integrity sha512-GOJ158CUMnN6cSahsv4+ExARvIDuzzinFjkp0E9WtiBa5zcVeLozVkWaE4IzFcc+Y48Wp1EDlUZsXRyAztQcSg==
+  dependencies:
+    pure-rand "^8.0.0"
+
 fast-deep-equal@^3.1.1, fast-deep-equal@^3.1.3:
   version "3.1.3"
   resolved "https://registry.yarnpkg.com/fast-deep-equal/-/fast-deep-equal-3.1.3.tgz#3a7d56b559d6cbc3eb512325244e619a65c6c525"
@@ -3245,6 +3257,11 @@ punycode@^2.1.0:
   version "2.3.1"
   resolved "https://registry.yarnpkg.com/punycode/-/punycode-2.3.1.tgz#027422e2faec0b25e1549c3e1bd8309b9133b6e5"
   integrity sha512-vYt7UD1U9Wg6138shLtLOvdAu+8DsC/ilFtEVHcH+wydcSpNE20AfSOduf6MkRFahL5FY7X1oU7nKVZFtfq8Fg==
+
+pure-rand@^8.0.0:
+  version "8.4.0"
+  resolved "https://registry.yarnpkg.com/pure-rand/-/pure-rand-8.4.0.tgz#1d9e26e9c0555486e08ae300d02796af8dec1cd0"
+  integrity sha512-IoM8YF/jY0hiugFo/wOWqfmarlE6J0wc6fDK1PhftMk7MGhVZl88sZimmqBBFomLOCSmcCCpsfj7wXASCpvK9A==
 
 qs@^6.9.1:
   version "6.15.2"

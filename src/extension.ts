@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import * as fp from "./ui/FuzzPanel";
 import * as tm from "./telemetry/Telemetry";
+import * as diffLlm from "./diff-llm/DiffLlmCommands";
 
 const disposables: vscode.Disposable[] = []; // Keep track of disposables
 
@@ -18,8 +19,10 @@ export function activate(context: vscode.ExtensionContext): void {
   /**
    * Push the commands to the VS Code command palette.
    */
-  for (const cmd of Object.values({ ...fp.commands, ...tm.commands })) {
-    const reg = vscode.commands.registerCommand(cmd.name, cmd.fn);
+  for (const cmd of Object.values({ ...fp.commands, ...tm.commands, ...diffLlm.commands })) {
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
+    const command = cmd as { name: string; fn: (...args: unknown[]) => unknown };
+    const reg = vscode.commands.registerCommand(command.name, command.fn);
     context.subscriptions.push(reg);
     disposables.push(reg);
   }

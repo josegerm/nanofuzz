@@ -3237,6 +3237,30 @@ function createStandardCodeLens(
 } // fn: createStandardCodeLens()
 
 /**
+ * Creates a CodeLens for specification ambiguity discovery (Diff-LLM).
+ *
+ * @param document The document containing the function
+ * @param fn The function definition
+ * @returns A CodeLens object
+ */
+function createDiffLlmCodeLens(
+  document: vscode.TextDocument,
+  fn: fuzzer.FunctionDef
+): vscode.CodeLens {
+  return new vscode.CodeLens(
+    new vscode.Range(
+      document.positionAt(fn.getRef().startOffset),
+      document.positionAt(fn.getRef().endOffset)
+    ),
+    {
+      title: "Discover Ambiguities",
+      command: "nanofuzz.diffLlmFunction",
+      arguments: [{ document, ref: fn.getRef() }],
+    }
+  );
+}
+
+/**
  * Creates a CodeLens for testing the FUT with property validators enabled.
  *
  * @param document The document containing the validator
@@ -3338,8 +3362,11 @@ export function provideCodeLenses(
     for (const fn of functions) {
       {
         if (!fn.isValidator()) {
-          // Regular function: single button for testing the function itself
-          codeLenses.push(createStandardCodeLens(document, fn));
+          // Regular function: standard fuzzer button and discover ambiguities button
+          codeLenses.push(
+            createStandardCodeLens(document, fn),
+            createDiffLlmCodeLens(document, fn)
+          );
         } else {
           // Validator: find the FUT and create one button for testing the FUT,
           // and one button for testing the validator itself

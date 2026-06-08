@@ -47,6 +47,16 @@
         "command": "nanofuzz.telemetry.log",
         "title": "Log Telemetry Event (internal)",
         "category": "NaNofuzz"
+      },
+      {
+        "command": "nanofuzz.diffLlmPrompt",
+        "title": "NaNofuzz: Discover Specification Ambiguity from Prompt...",
+        "category": "NaNofuzz"
+      },
+      {
+        "command": "nanofuzz.diffLlmFunction",
+        "title": "NaNofuzz: Discover Ambiguities",
+        "category": "NaNofuzz"
       }
     ],
     "configuration": [
@@ -288,10 +298,12 @@
   },
   "dependencies": {
     "@babel/core": "^7.27.1",
+    "@google/generative-ai": "^0.24.1",
     "@node-llm/core": "^1.14.1",
     "@types/vscode-webview": "^1.57.5",
     "@vscode/codicons": "^0.0.45",
     "@vscode/webview-ui-toolkit": "^1.2.2",
+    "fast-check": "^4.8.0",
     "istanbul-lib-coverage": "^3.2.2",
     "istanbul-lib-hook": "^3.0.0",
     "istanbul-lib-instrument": "6.0.3",

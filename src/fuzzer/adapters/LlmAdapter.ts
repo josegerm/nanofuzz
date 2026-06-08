@@ -37,7 +37,8 @@ export class LlmAdapter {
     // If apikey is defined, add it to the config.
     // Otherwise, let @node-llm try to infer it from env
     if (cfg.apiKey !== "") {
-      (this._modelConfig as any)[`${cfg.provider}ApiKey`] = cfg.apiKey;
+      const key = `${cfg.provider}ApiKey`;
+      Object.assign(this._modelConfig, { [key]: cfg.apiKey });
     }
 
     // Create the model chat session
