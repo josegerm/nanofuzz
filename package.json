@@ -57,6 +57,11 @@
         "command": "nanofuzz.diffLlmFunction",
         "title": "NaNofuzz: Discover Ambiguities",
         "category": "NaNofuzz"
+      },
+      {
+        "command": "nanofuzz.diffLlmSpec",
+        "title": "NaNofuzz: Generate from Specification",
+        "category": "NaNofuzz"
       }
     ],
     "configuration": [
