@@ -1475,7 +1475,7 @@ function updateSortOrders(type: FuzzResultCategory, thisCol: string) {
     case FuzzSortOrder.desc:
       delete columnSortOrders[type][thisCol]; // not present, meaning "none"
       break;
-    default:
+    case FuzzSortOrder.none:
       columnSortOrders[type][thisCol] = FuzzSortOrder.asc;
   }
 } // fn: updateSortOrders

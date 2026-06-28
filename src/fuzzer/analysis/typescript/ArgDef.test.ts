@@ -1,69 +1,14 @@
-import { ArgTag, TypeRef, ArgType, ArgOptions, Interval } from "./Types";
+import { ArgTag, ArgType, ArgOptions, Interval } from "./Types";
 import { ArgDef } from "./ArgDef";
 import seedrandom from "seedrandom";
 import * as JSON5 from "json5";
 import { ArgDefValidator } from "./ArgDefValidator";
 import { ArgDefGenerator } from "./ArgDefGenerator";
 import { ArgDefMutator } from "./ArgDefMutator";
+import { makeArgDef, makeTypeRef } from "./TestUtils";
 
 const argOptions = ArgDef.getDefaultOptions();
 const dummyModule = "dummy.ts";
-
-/**
- * Helper functions for generating TypeRefs and ArgDefs
- */
-function makeArgDef(
-  module: string,
-  name: string,
-  offset: number,
-  type: ArgTag,
-  argOptions = ArgDef.getDefaultOptions(),
-  dims: number,
-  optional: boolean = false,
-  children: TypeRef[] = [],
-  typeRefName?: string,
-  literalValue?: ArgType
-): ArgDef<ArgType> {
-  return ArgDef.fromTypeRef(
-    makeTypeRef(
-      module,
-      name,
-      type,
-      dims,
-      optional,
-      children,
-      typeRefName,
-      literalValue
-    ),
-    argOptions,
-    offset
-  );
-}
-function makeTypeRef(
-  module: string,
-  name: string,
-  type: ArgTag,
-  dims: number,
-  optional: boolean = false,
-  children: TypeRef[] = [],
-  typeRefName?: string,
-  literalValue?: ArgType
-): TypeRef {
-  return {
-    name: name,
-    module: module,
-    typeRefName,
-    optional: optional ?? false,
-    dims: 0,
-    type: {
-      dims: dims,
-      type: type,
-      children: children,
-      value: literalValue,
-    },
-    isExported: true,
-  };
-}
 
 /**
  * Test that getTypeAnnotation returns the correct type annotation for a given
@@ -401,6 +346,23 @@ describe("fuzzer/analysis/typescript/ArgDef: getTypeAnnotation", () => {
     );
   });
 
+  it("type annotation for tuple w/o dimensions", () => {
+    const argDef = makeArgDef(
+      dummyModule,
+      "test",
+      0,
+      ArgTag.TUPLE,
+      argOptions,
+      0,
+      false,
+      [
+        makeTypeRef(dummyModule, "bool", ArgTag.BOOLEAN, 1),
+        makeTypeRef(dummyModule, "str", ArgTag.STRING, 0),
+      ]
+    );
+    expect(argDef.getTypeAnnotation()).toBe("[boolean[], string]");
+  });
+
   it("NoInput test", function () {
     const prng = seedrandom("qwertyuiop");
     /*
@@ -584,8 +546,6 @@ function abbrSpec(spec: ArgDef<ArgType>, indents = 0): string[] {
   line.push(`dims: ${JSON5.stringify(spec.getOptions().dimLength)}`);
   if (spec.isNoInput()) line.push(`NOINPUT`);
   if (spec.isOptional()) line.push(`OPTIONAL`);
-  if (spec.getType() === ArgTag.NUMBER && spec.getOptions().numSigned)
-    line.push(`SIGNED`);
   if (spec.getType() === ArgTag.NUMBER && spec.getOptions().numInteger)
     line.push(`INTEGER`);
   if (
@@ -702,24 +662,13 @@ function getRandomArgDef(
       options = {
         ...options,
         numInteger: prng() < 0.5,
-        numSigned: prng() < 0.5,
       };
       if (options.numInteger) {
-        if (options.numSigned) {
-          const min = Math.floor(prng() * 200) - 100;
-          interval = [{ min, max: min + Math.floor(prng() * 200) }];
-        } else {
-          const min = Math.floor(prng() * 100);
-          interval = [{ min, max: min + Math.floor(prng() * 100) }];
-        }
+        const min = Math.floor(prng() * 100);
+        interval = [{ min, max: min + Math.floor(prng() * 100) }];
       } else {
-        if (options.numSigned) {
-          const min = prng() * 200 - 100;
-          interval = [{ min, max: min + prng() * 200 }];
-        } else {
-          const min = prng() * 100;
-          interval = [{ min, max: min + prng() * 100 }];
-        }
+        const min = prng() * 100;
+        interval = [{ min, max: min + prng() * 100 }];
       }
       break;
     }
@@ -754,6 +703,14 @@ function getRandomArgDef(
     }
     case ArgTag.UNION: {
       break;
+    }
+    case ArgTag.TUPLE: {
+      break;
+    }
+    case ArgTag.UNRESOLVED: {
+      throw new Error(
+        "ArgTag.UNRESOLVED is not a valid type for getRandomArgDef"
+      );
     }
   }
   return new ArgDef<ArgType>(

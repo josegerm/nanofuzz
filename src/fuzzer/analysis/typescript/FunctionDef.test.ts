@@ -1,6 +1,7 @@
-import { FunctionRef, ArgTag, TypeRef, ArgType } from "./Types";
+import { FunctionRef, ArgTag } from "./Types";
 import { ArgDef } from "./ArgDef";
 import { ProgramDef } from "./ProgramDef";
+import { makeArgDef, makeTypeRef } from "./TestUtils";
 
 const argOptions = ArgDef.getDefaultOptions();
 const dummyModule = "dummy.ts";
@@ -17,62 +18,6 @@ const dummyProgram: ProgramDef = ProgramDef.fromSource(
   () => "",
   argOptions
 ).setModule(dummyModule);
-
-/**
- * Helped functions for generating TypeRefs and ArgDefs
- */
-function makeArgDef(
-  module: string,
-  name: string,
-  offset: number,
-  type: ArgTag,
-  argOptions = ArgDef.getDefaultOptions(),
-  dims: number,
-  optional: boolean = false,
-  children: TypeRef[] = [],
-  typeRefName?: string,
-  literalValue?: ArgType
-): ArgDef<ArgType> {
-  return ArgDef.fromTypeRef(
-    makeTypeRef(
-      module,
-      name,
-      type,
-      dims,
-      optional,
-      children,
-      typeRefName,
-      literalValue
-    ),
-    argOptions,
-    offset
-  );
-}
-function makeTypeRef(
-  module: string,
-  name: string,
-  type: ArgTag,
-  dims: number,
-  optional: boolean = false,
-  children: TypeRef[] = [],
-  typeRefName?: string,
-  literalValue?: ArgType
-): TypeRef {
-  return {
-    name: name,
-    module: module,
-    typeRefName,
-    optional: optional ?? false,
-    dims: 0,
-    type: {
-      dims: dims,
-      type: type,
-      children: children,
-      value: literalValue,
-    },
-    isExported: true,
-  };
-}
 
 /**
  * Test that the TypeScript analyzer retrieves function parameters correctly in
@@ -992,6 +937,183 @@ describe("fuzzer/analysis/typescript/FunctionDef:", () => {
             children: [],
             resolved: true,
             type: ArgTag.BOOLEAN,
+          },
+        },
+      },
+    ]);
+  });
+
+  it("findFnInSource: tuple args", () => {
+    const buildLocationSrc = `function test(name:string,latLngs:LatLng[]): MaybeLocation {
+      if (latLngs.length === 0) {
+        return;
+      }
+      return [name, latLngs[0]];
+    }`;
+    const src =
+      `
+    type LatLng = [number, number];
+    type Location = [name: string, latLng: LatLng];
+    type MaybeLocation = Location | undefined;
+    /* Dummy comment */
+    export ` +
+      buildLocationSrc +
+      ";";
+    const thisProgram = dummyProgram.setSrc(() => src);
+    expect(
+      Object.values(thisProgram.getFunctions()).map((e) => e.getRef())
+    ).toEqual([
+      {
+        name: "test",
+        module: "dummy.ts",
+        src: buildLocationSrc,
+        cmt: `/* Dummy comment */`,
+        startOffset: 171,
+        endOffset: 328,
+        isExported: true,
+        isVoid: false,
+        args: [
+          {
+            dims: 0,
+            isExported: false,
+            module: "dummy.ts",
+            name: "name",
+            optional: false,
+            type: {
+              dims: 0,
+              children: [],
+              resolved: true,
+              type: ArgTag.STRING,
+            },
+          },
+          {
+            dims: 1,
+            isExported: false,
+            module: "dummy.ts",
+            name: "latLngs",
+            optional: false,
+            type: {
+              type: ArgTag.TUPLE,
+              resolved: true,
+              dims: 0,
+              children: [
+                {
+                  dims: 0,
+                  isExported: false,
+                  module: "dummy.ts",
+                  optional: false,
+                  type: {
+                    type: ArgTag.NUMBER,
+                    resolved: true,
+                    dims: 0,
+                    children: [],
+                  },
+                },
+                {
+                  dims: 0,
+                  isExported: false,
+                  module: "dummy.ts",
+                  optional: false,
+                  type: {
+                    type: ArgTag.NUMBER,
+                    dims: 0,
+                    children: [],
+                    resolved: true,
+                  },
+                },
+              ],
+            },
+            typeRefName: "LatLng",
+          },
+        ],
+        returnType: {
+          module: "dummy.ts",
+          typeRefName: "MaybeLocation",
+          dims: 0,
+          isExported: false,
+          optional: false,
+          type: {
+            dims: 0,
+            type: ArgTag.UNION,
+            children: [
+              {
+                module: "dummy.ts",
+                typeRefName: "Location",
+                dims: 0,
+                isExported: false,
+                optional: false,
+                type: {
+                  dims: 0,
+                  children: [
+                    {
+                      dims: 0,
+                      isExported: false,
+                      module: "dummy.ts",
+                      optional: false,
+                      type: {
+                        type: ArgTag.STRING,
+                        resolved: true,
+                        dims: 0,
+                        children: [],
+                      },
+                    },
+                    {
+                      module: "dummy.ts",
+                      typeRefName: "LatLng",
+                      dims: 0,
+                      isExported: false,
+                      optional: false,
+                      type: {
+                        type: ArgTag.TUPLE,
+                        dims: 0,
+                        children: [
+                          {
+                            dims: 0,
+                            isExported: false,
+                            module: "dummy.ts",
+                            optional: false,
+                            type: {
+                              type: ArgTag.NUMBER,
+                              resolved: true,
+                              dims: 0,
+                              children: [],
+                            },
+                          },
+                          {
+                            dims: 0,
+                            isExported: false,
+                            module: "dummy.ts",
+                            optional: false,
+                            type: {
+                              type: ArgTag.NUMBER,
+                              dims: 0,
+                              children: [],
+                              resolved: true,
+                            },
+                          },
+                        ],
+                        resolved: true,
+                      },
+                    },
+                  ],
+                  resolved: true,
+                  type: ArgTag.TUPLE,
+                },
+              },
+              {
+                dims: 0,
+                isExported: false,
+                module: "dummy.ts",
+                optional: false,
+                type: {
+                  dims: 0,
+                  children: [],
+                  resolved: true,
+                  type: ArgTag.LITERAL,
+                },
+              },
+            ],
+            resolved: true,
           },
         },
       },

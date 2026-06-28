@@ -71,7 +71,9 @@ export class ArgDef<T extends ArgType> {
     this.dims = dims ?? 0;
     this.optional = optional ?? false;
     this.children =
-      type === ArgTag.OBJECT || type === ArgTag.UNION ? children ?? [] : [];
+      type === ArgTag.OBJECT || type === ArgTag.UNION || type === ArgTag.TUPLE
+        ? children ?? []
+        : [];
     this.typeRef = typeRef;
 
     // Ensure the options are valid before ingesting them
@@ -182,7 +184,7 @@ export class ArgDef<T extends ArgType> {
       case ArgTag.NUMBER:
         return [
           {
-            min: options.numSigned ? -100 : 0,
+            min: 0,
             max: 100,
           },
         ];
@@ -198,8 +200,9 @@ export class ArgDef<T extends ArgType> {
       case ArgTag.OBJECT:
       case ArgTag.LITERAL:
       case ArgTag.UNION:
+      case ArgTag.TUPLE:
         return [];
-      default:
+      case ArgTag.UNRESOLVED:
         throw new Error(`Unsupported type: ${type}`);
     }
   } // fn: getDefaultIntervals()
@@ -480,6 +483,7 @@ export class ArgDef<T extends ArgType> {
       return this.typeRef;
     }
 
+    // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check
     switch (this.type) {
       case ArgTag.OBJECT: {
         // Literal object, no type. Recursively walk
@@ -492,15 +496,25 @@ export class ArgDef<T extends ArgType> {
         );
         return `{ ${childTypeAnnotations.join("; ")} }`;
       }
+
       case ArgTag.UNION: {
         const childTypeAnnotations = this.children.map((child) =>
           child.getTypeAnnotation(options)
         );
         return childTypeAnnotations.join(" | ");
       }
+
       case ArgTag.LITERAL: {
         return `${JSON5.stringify(this.getConstantValue())}`;
       }
+
+      case ArgTag.TUPLE: {
+        const childTypeAnnotations = this.children.map((child) =>
+          child.getTypeAnnotation(options)
+        );
+        return `[${childTypeAnnotations.join(", ")}]`;
+      }
+
       default:
         return this.type;
     }
@@ -548,9 +562,9 @@ export class ArgDef<T extends ArgType> {
   } // fn: getTypeAnnotation()
 
   /**
-   * Returns the default option set for signed integer values.
+   * Returns the default option set.
    *
-   * @returns the default option set for signed integer values
+   * @returns the default option set
    */
   public static getDefaultOptions(): ArgOptions {
     return {
@@ -571,9 +585,6 @@ export class ArgDef<T extends ArgType> {
       numInteger: vscode.workspace
         .getConfiguration("nanofuzz.argdef")
         .get("numInteger", true),
-      numSigned: vscode.workspace
-        .getConfiguration("nanofuzz.argdef")
-        .get("numSigned", false),
 
       // `Any` defaults
       anyType: vscode.workspace
@@ -595,18 +606,6 @@ export class ArgDef<T extends ArgType> {
       dimLength: [],
     };
   } // fn: getDefaultOptions()
-
-  /**
-   * Returns the default option set for signed float values.
-   *
-   * @returns the default option set for signed float values
-   */
-  public static getDefaultFloatOptions(): ArgOptions {
-    return {
-      ...ArgDef.getDefaultOptions(),
-      numInteger: false,
-    };
-  } // fn: getDefaultFloatOptions()
 
   /**
    * Accepts an option set and returns true if it is valid; false otherwise.

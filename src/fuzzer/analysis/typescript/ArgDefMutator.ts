@@ -371,6 +371,50 @@ export class ArgDefMutator {
             }
             break;
           }
+
+          case ArgTag.TUPLE: {
+            const value = subInput.subElement;
+            if (typeof value === "object" && !Array.isArray(value)) {
+              const children = spec.getChildren().filter((c) => !c.isNoInput());
+              for (const [i, c] of children.entries()) {
+                // Mutator to generate optional member if missing
+                if (c.isOptional()) {
+                  const oldValue = value[i];
+                  if (value[i] === undefined) {
+                    mutations.push(
+                      ...[
+                        {
+                          name: `optional-genMember`,
+                          value: ArgDefGenerator.gen(c, prng),
+                          path: [...subInput.subPath, i],
+                        },
+                      ].filter(
+                        (e) =>
+                          JSON5.stringify(e.value) !== JSON5.stringify(oldValue)
+                      )
+                    );
+                  } else {
+                    // Mutator to delete optional input
+                    mutations.push({
+                      name: "optional-delete",
+                      value: undefined, // !!!!!!! should delete if parent is object
+                      path: [...subInput.subPath, i],
+                    });
+                  }
+                }
+
+                // Mutators for tuple member value
+                subInputs.push({
+                  subPath: [...subInput.subPath, i],
+                  subElement: value[i],
+                  subSpec: c,
+                  inArray: false,
+                });
+              }
+            }
+            break;
+          }
+
           case ArgTag.UNRESOLVED: {
             throw new Error(
               `Encountered unresolved ArgDef: ${JSON5.stringify(spec)}`

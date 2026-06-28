@@ -6,7 +6,6 @@ const argDefaults: ArgOptions = {
   strCharset: "abc",
   strLength: { min: 0, max: 3 },
   numInteger: true,
-  numSigned: false,
   anyType: ArgTag.NUMBER,
   anyDims: 0,
   dftDimLength: { min: 0, max: 1 },

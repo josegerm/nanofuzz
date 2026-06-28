@@ -113,6 +113,41 @@ export class ArgDefValidator {
           }
           return false; // not an object or is an array
         }
+
+        case ArgTag.TUPLE: {
+          if (typeof value === "object" && Array.isArray(value)) {
+            const children = spec.getChildren();
+            if (value.length !== children.length) {
+              return false; // tuples must have the same number of elements as their specs
+            }
+
+            for (const [i, c] of children.entries()) {
+              const childValue = value[i];
+              const isNoInput = c.isNoInput();
+              const isOptional = c.isOptional();
+              let valid = false; // assume invalid & look for cases of validity
+              if (isNoInput && childValue === undefined) {
+                valid = true;
+              }
+              if (!valid && isOptional && childValue === undefined) {
+                valid = true;
+              }
+              if (
+                !valid &&
+                !isNoInput &&
+                ArgDefValidator.validate(childValue, c)
+              ) {
+                valid = true;
+              }
+              if (!valid) {
+                return false;
+              }
+            }
+            return true; // all child checks passed
+          }
+          return false; // not an array
+        }
+
         case ArgTag.UNION: {
           const children = spec.getChildren().filter((c) => !c.isNoInput());
           for (const c of children) {
@@ -160,7 +195,7 @@ const traverse = (
 
   // Traverse the array and validate its contents
   for (const i in a) {
-    if (Array.isArray(a[i]) && currDepth < spec.getDim()) {
+    if (Array.isArray(a[i]) && currDepth + 1 < spec.getDim()) {
       if (!traverse(a[i], spec, currDepth + 1)) {
         return false; // next level of array is invalid
       }

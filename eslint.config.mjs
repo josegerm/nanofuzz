@@ -27,6 +27,7 @@ export default defineConfig(
         1,
         { assertionStyle: "never" },
       ],
+      "@typescript-eslint/switch-exhaustiveness-check": "error",
     },
   },
   {

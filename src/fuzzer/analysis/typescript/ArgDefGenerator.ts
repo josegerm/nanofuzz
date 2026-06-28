@@ -36,7 +36,7 @@ export class ArgDefGenerator {
    */
   public next(): ArgValueTypeWrapped[] {
     return this._gens.map((e) => {
-      return { value: e() };
+      return { tag: "ArgValueTypeWrapped", value: e() };
     });
   } // fn: next
 
@@ -92,20 +92,21 @@ function generateRandomInputFn<T extends ArgType>(
   //if (arg.isConstant() && arg.getDim() === 0 && !arg.isNoInput())
   //  return () => arg.getConstantValue();
 
-  switch (arg.getType()) {
-    case "number":
+  const argType = arg.getType();
+  switch (argType) {
+    case ArgTag.NUMBER:
       randFn = getRandomNumber;
       break;
-    case "boolean":
+    case ArgTag.BOOLEAN:
       randFn = getRandomBool;
       break;
-    case "string":
+    case ArgTag.STRING:
       randFn = getRandomString;
       break;
-    case "literal":
+    case ArgTag.LITERAL:
       randFn = getLiteral;
       break;
-    case "union":
+    case ArgTag.UNION:
       // We generate this here using arg
       randFn = (
         prng: seedrandom.prng,
@@ -127,7 +128,7 @@ function generateRandomInputFn<T extends ArgType>(
         return generateRandomInputFn(children[rn], prng)();
       };
       break;
-    case "object":
+    case ArgTag.OBJECT:
       // We generate this here using arg
       randFn = (
         prng: seedrandom.prng,
@@ -149,8 +150,25 @@ function generateRandomInputFn<T extends ArgType>(
         return outObj;
       };
       break;
-    default:
-      throw new Error(`Unsupported argument type: ${arg.getType()[0]}`);
+
+    case ArgTag.TUPLE:
+      randFn = (
+        prng: seedrandom.prng,
+        min: ArgValueType,
+        max: ArgValueType
+      ): ArgValueType => {
+        if (typeof min !== "object" || typeof max !== "object")
+          throw new Error("Min and max must be objects");
+        const outTuple: ArgValueType[] = [];
+        for (const child of arg.getChildren().filter((e) => !e.isNoInput())) {
+          outTuple.push(generateRandomInputFn(child, prng)());
+        }
+        return outTuple;
+      };
+      break;
+
+    case ArgTag.UNRESOLVED:
+      throw new Error(`Unsupported argument type: ${argType[0]}`);
   }
 
   // Setup environment for callback
@@ -163,7 +181,9 @@ function generateRandomInputFn<T extends ArgType>(
   // Callback fn to generate value
   const randFnWrapper: PublicRandFn = () => {
     if (arg.isNoInput()) return undefined;
-    if (type === ArgTag.OBJECT) return randFn(prng, {}, {}, options);
+    if (type === ArgTag.OBJECT || type === ArgTag.TUPLE) {
+      return randFn(prng, {}, {}, options);
+    }
     if (type === ArgTag.UNION) {
       if (arg.getChildren().filter((child) => !child.isNoInput()).length) {
         return randFn(prng, {}, {}, options);

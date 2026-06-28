@@ -33,18 +33,18 @@ To use NaNofuzz in your own projects:
 NaNofuzz is an **experimental** testing platform developed by the Accelerated Testing Research Program at Carnegie Mellon University's School of Computer Science. While NaNofuzz is **not** intended for production use, contributions are welcome to address the limitations below. 
 
 NaNofuzz supports exported standard and arrow functions with any mixture of the following parameter types:
- - Numbers (integers and floats, signed and unsigned)
+ - Numbers (integers and floats)
  - Strings
  - Booleans
  - Literal object types
- - n-dimension arrays of any of the above
- - Optional and mandatory parameters
+ - Tuples, unions, and n-dimension arrays of any of the above
+ - Optional and mandatory parameters and members
 
 NaNofuzz automatically generates a test suite in these formats for use in CI:
  - Jest
 
 The following are not yet supported:
- - Deconstructed types, Tuples, Enums, Generics, Function, and built-in (e.g., Record) types
+ - Inputs of deconstructed, enum, generic, intersection, utility (e.g., Record), and function types
  - Non-finite numeric inputs (`NaN`, `Infinity`), `bigint`, `null`
  - Class and object methods
  - Compiling to module formats other than CommonJS (see [VS Code issue 130367](https://github.com/microsoft/vscode/issues/130367))

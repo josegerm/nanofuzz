@@ -193,12 +193,6 @@
             "default": true,
             "description": "Generate integers as numeric inputs by default?"
           },
-          "nanofuzz.argdef.numSigned": {
-            "title": "Generate signed inputs?",
-            "type": "boolean",
-            "default": false,
-            "description": "Generate signed values as numeric inputs by default?"
-          },
           "nanofuzz.argdef.dftDimLength.min": {
             "title": "Minimum array length",
             "type": "number",
@@ -283,6 +277,7 @@
     "build": "node build.mjs",
     "test": "node --no-experimental-strip-types ./node_modules/jasmine/bin/jasmine.js",
     "lint": "eslint src assets/ui",
+    "lint:errors": "eslint --quiet src assets/ui",
     "vscode:prepublish": "yarn build",
     "publish": "vsce publish --yarn",
     "package": "vsce package --yarn",
@@ -333,7 +328,7 @@
     "@types/vscode": "^1.75.0",
     "@vscode/vsce": "^3.6.0",
     "cross-env": "^10.0.0",
-    "esbuild": "^0.25.0",
+    "esbuild": "^0.28.1",
     "escape-goat": "^4.0.0",
     "eslint": "^9.26.0",
     "eslint-config-prettier": "^10.1.8",

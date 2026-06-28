@@ -63,7 +63,10 @@ const intOptions: FuzzOptions = {
  */
 const floatOptions: FuzzOptions = {
   ...intOptions,
-  argDefaults: ArgDef.getDefaultFloatOptions(),
+  argDefaults: {
+    ...ArgDef.getDefaultOptions(),
+    numInteger: false,
+  },
 };
 
 /**

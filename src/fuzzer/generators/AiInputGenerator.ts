@@ -228,10 +228,7 @@ export class AiInputGenerator extends AbstractInputGenerator {
    *
    * @returns JSON schema
    */
-  protected _getInputsSchema(): [
-    ReturnType<zod.ZodType["toJSONSchema"]>,
-    string[],
-  ] {
+  protected _getInputsSchema(): [zod.ZodObject, string[]] {
     const zodObj: { [k: string]: zod.ZodType } = {};
     const directives: string[] = [];
     this._specs.forEach((arg) => {
@@ -254,9 +251,7 @@ export class AiInputGenerator extends AbstractInputGenerator {
       `${NANOFUZZ_FALSE} is a placeholder for the actual value \`false\``
     );
     return [
-      zod
-        .strictObject({ programInputs: zod.array(zod.strictObject(zodObj)) })
-        .toJSONSchema(),
+      zod.strictObject({ programInputs: zod.array(zod.strictObject(zodObj)) }),
       directives,
     ];
   } // fn: _getInputsSchema
@@ -277,11 +272,8 @@ export class AiInputGenerator extends AbstractInputGenerator {
     path: string,
     directives: string[]
   ): zod.ZodType {
-    // !!! do we handle optionality or dimensions in all cases here?
     const argIntervals = inArg.getIntervals();
-    const argChildren = inArg
-      .getChildren()
-      .filter((child) => !child.isNoInput());
+    const argChildren = inArg.getChildren();
     const argOptions = inArg.getOptions();
 
     // Helper function that creates a Zod schema from an ArgDef
@@ -346,9 +338,12 @@ export class AiInputGenerator extends AbstractInputGenerator {
               return zod.enum([literalValue]);
             case "object":
               throw new Error(`Array and Object literals not supported`);
-            default:
+            case "bigint": // fallsthrough
+            case "symbol": // fallsthrough
+            case "function":
               throw new Error(`Type not supported: ${typeof literalValue}`);
           }
+          break;
         }
         case ArgTag.OBJECT: {
           const obj: { [k: string]: zod.ZodType } = {};
@@ -364,6 +359,33 @@ export class AiInputGenerator extends AbstractInputGenerator {
           });
           return zod.strictObject(obj);
         }
+        case ArgTag.TUPLE: {
+          const tupleItems = argChildren.map((child, i) => {
+            const zodChild = this._argDefToSchema(
+              child,
+              `${path}[${i}]`,
+              directives
+            );
+
+            return child.isOptional()
+              ? zod.union([zodChild, zod.enum([NANOFUZZ_MISSING_PROPERTY])])
+              : zodChild;
+          });
+
+          const desc =
+            argChildren.length === 0
+              ? "value must be an empty tuple"
+              : `value must be a tuple of length ${argChildren.length}`;
+
+          directives.push(`${path}: ${desc}`);
+
+          const [first, ...rest] = tupleItems;
+
+          if (first === undefined) {
+            return zod.tuple([]);
+          }
+          return zod.tuple([first, ...rest]);
+        }
         case ArgTag.UNION: {
           const unionMembers = argChildren.map((child, i) =>
             this._argDefToSchema(child, `${path}.union[${i}]`, directives)
@@ -374,7 +396,7 @@ export class AiInputGenerator extends AbstractInputGenerator {
             ...unionMembers.slice(2),
           ]);
         }
-        default: {
+        case ArgTag.UNRESOLVED: {
           throw new Error(`Unexpected argument type: "${arg.getType()}"`);
         }
       }
@@ -455,7 +477,12 @@ function _decode(data: ArgValueType): ArgValueType {
           return data;
       }
     }
-    default:
+    case "number": // fallsthrough
+    case "bigint": // fallsthrough
+    case "boolean": // fallsthrough
+    case "symbol": // fallsthrough
+    case "undefined": // fallsthrough
+    case "function":
       return data;
   }
 } // fn: _decode

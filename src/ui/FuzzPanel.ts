@@ -2793,6 +2793,8 @@ ${inArgConsts}
       );
     } else {
       typeString = htmlEscape(argType.toLowerCase());
+
+      // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check
       switch (argType) {
         case fuzzer.ArgTag.OBJECT:
           typeString = "Object";
@@ -2824,6 +2826,7 @@ ${inArgConsts}
     }
 
     let sep: string;
+    // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check
     switch (argType) {
       case fuzzer.ArgTag.LITERAL:
         sep = endSep;
@@ -2833,6 +2836,9 @@ ${inArgConsts}
         break;
       case fuzzer.ArgTag.OBJECT:
         sep = ` = {` + htmlEllipsis;
+        break;
+      case fuzzer.ArgTag.TUPLE:
+        sep = ` = [` + htmlEllipsis;
         break;
       default:
         sep = " = " + htmlEllipsis;
@@ -2977,6 +2983,37 @@ ${inArgConsts}
         html += `</div>`;
         break;
       }
+
+      case fuzzer.ArgTag.LITERAL:
+        // A literal typed input has only one possible value
+        break;
+
+      // Tuple-specific Options
+      case fuzzer.ArgTag.TUPLE: {
+        // Output the array form prior to the child arguments.
+        // This seems odd, but the screen reads better to the user this way.
+        html += this._argDefArrayToHtmlForm(arg, idBase, disabledFlag);
+        html += `<div>`;
+        arg
+          .getChildren()
+          .forEach(
+            (child) =>
+              (html += this._argDefToHtmlForm(
+                child,
+                counter,
+                "",
+                "",
+                arg.getType()
+              ))
+          );
+        html += `</div>`;
+        break;
+      }
+
+      case fuzzer.ArgTag.UNRESOLVED:
+        throw new Error(
+          `Cannot render an unresolved argument definition as an HTML form.`
+        );
     }
 
     // For objects & unions: output the array settings
@@ -2986,8 +3023,8 @@ ${inArgConsts}
 
     html += `</div>`;
     // For objects: output the end of object character ("}") here
-    if (argType === fuzzer.ArgTag.OBJECT) {
-      html += /*html*/ `<div class="argDef-preClose"></div><div class="argDef-close">}${endSep}</div>`;
+    if (argType === fuzzer.ArgTag.OBJECT || argType === fuzzer.ArgTag.TUPLE) {
+      html += /*html*/ `<div class="argDef-preClose"></div><div class="argDef-close">${argType === fuzzer.ArgTag.OBJECT ? "}" : "]"}${endSep}</div>`;
     }
     html += `</div>`;
 
@@ -3419,6 +3456,7 @@ function _applyArgOverrides(
     }
 
     // Min and max values
+    // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check
     switch (thisArg.getType()) {
       case fuzzer.ArgTag.NUMBER:
         if (thisOverride.number) {
