@@ -13,6 +13,7 @@ const disposables: vscode.Disposable[] = []; // Keep track of disposables
 export function activate(context: vscode.ExtensionContext): void {
   tm.init(context);
   fp.init(context);
+  diffLlm.initDiffLlm(context);
 
   // --------------------------- Commands --------------------------- //
 

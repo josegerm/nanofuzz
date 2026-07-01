@@ -1,7 +1,17 @@
 import * as vscode from 'vscode';
 import { DiffLlmEngine, SpecDiscoveryResult } from './DiffLlmEngine';
 import { FunctionMatch } from '../ui/FuzzPanel';
+
+let extensionContext: vscode.ExtensionContext;
+export function initDiffLlm(context: vscode.ExtensionContext): void {
+  extensionContext = context;
+}
+
 export const commands = {
+  setGeminiApiKey: {
+    name: 'nanofuzz.setGeminiApiKey',
+    fn: handleSetGeminiApiKeyCommand
+  },
   diffLlmPrompt: {
     name: 'nanofuzz.diffLlmPrompt',
     fn: handleDiffLlmPromptCommand
@@ -15,6 +25,57 @@ export const commands = {
     fn: handleDiffLlmSpecCommand
   }
 };
+
+async function handleSetGeminiApiKeyCommand(): Promise<void> {
+  /* Ask for the LiteLLM / Gemini API Key*/
+  const apiKey = await vscode.window.showInputBox({
+    title: 'NaNofuzz: Enter LiteLLM / Gemini API Key',
+    prompt: 'Your key is saved securely on your operating system.',
+    placeHolder: 'sk-...',
+    password: true,
+    ignoreFocusOut: true
+  });
+
+  if (!apiKey) return;
+
+  /* Ask for Base URL */
+  const baseUrl = await vscode.window.showInputBox({
+    title: 'NaNofuzz: Enter LiteLLM Gateway Base URL',
+    prompt: 'Enter the endpoint URL of your AI gateway.',
+    placeHolder: 'htpps://your-gateway.com/v1',
+    ignoreFocusOut: true
+  });
+
+  if (baseUrl) {
+    await extensionContext.secrets.store('gemini_api_key', apiKey);
+    await extensionContext.secrets.store('gemini_base_url', baseUrl);
+    vscode.window.showInformationMessage('NaNofuzz: Gateway credentials saved securely!');
+  }
+}
+
+async function getGatewayCredentials(): Promise<{ apiKey: string; baseUrl: string } | null> {
+  if (!extensionContext) {
+    throw new Error('DiffLlm module has not been initialized with ExtensionContext');
+  }
+
+  const apiKey = await extensionContext.secrets.get('gemini_api_key');
+  const baseUrl = await extensionContext.secrets.get('gemini_base_url');
+
+  if (!apiKey || !baseUrl) {
+    const action = 'Configure Gateway';
+    const choice = await vscode.window.showErrorMessage(
+      'NaNofuzz: AI Gateway configuration is missing.',
+      action
+    );
+    if (choice === action) {
+      vscode.commands.executeCommand('nanofuzz.setGeminiApiKey');
+    }
+    return null;
+  }
+
+  return { apiKey, baseUrl };
+}
+
 function getWorkspaceRoot(): string {
   if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
     return vscode.workspace.workspaceFolders[0].uri.fsPath;
@@ -25,6 +86,9 @@ function getWorkspaceRoot(): string {
  * Greenfield: Run Specification Discovery from a Prompt
  */
 async function handleDiffLlmPromptCommand(): Promise<void> {
+  const credentials = await getGatewayCredentials();
+  if (!credentials) return;
+
   const userPrompt = await vscode.window.showInputBox({
     prompt: 'Enter a natural language prompt describing the function to design',
     placeHolder: "e.g., 'write a function rotate(rect) that rotates a Rectangle 90deg clockwise'",
@@ -41,7 +105,7 @@ async function handleDiffLlmPromptCommand(): Promise<void> {
   }, async (progress) => {
     try {
       progress.report({ message: 'Initializing Gemini spec analyzer...' });
-      const engine = new DiffLlmEngine();
+      const engine = new DiffLlmEngine(credentials.apiKey, credentials.baseUrl);
       progress.report({ message: 'Analyzing prompt and generating Fast-Check arbitraries...' });
       
       progress.report({ message: 'Generating alternative AI implementations...' });
@@ -77,15 +141,21 @@ async function handleDiffLlmFunctionCommand(match?: FunctionMatch): Promise<void
     vscode.window.showWarningMessage('Please use the "Discover Ambiguities" button in the editor above a function.');
     return;
   }
+
+  const credentials = await getGatewayCredentials();
+  if (!credentials) return;
+
   const { document, ref } = match;
   // Save the document first if it is dirty
   if (document.isDirty) {
     await document.save();
   }
+
   const fullText = document.getText();
   const fnSource = fullText.substring(ref.startOffset, ref.endOffset);
   const fnName = ref.name;
   const workspaceRoot = getWorkspaceRoot();
+  
   await vscode.window.withProgress({
     location: vscode.ProgressLocation.Notification,
     title: `NaNofuzz: Analyzing ${fnName}`,
@@ -93,7 +163,7 @@ async function handleDiffLlmFunctionCommand(match?: FunctionMatch): Promise<void
   }, async (progress) => {
     try {
       progress.report({ message: `Extracting ${fnName} structure...` });
-      const engine = new DiffLlmEngine();
+      const engine = new DiffLlmEngine(credentials.apiKey, credentials.baseUrl);
       progress.report({ message: 'Analyzing specification with Gemini...' });
       
       progress.report({ message: 'Generating alternative interpretations...' });
@@ -130,6 +200,9 @@ async function handleDiffLlmSpecCommand(): Promise<void> {
     vscode.window.showErrorMessage('Please open a file in the editor first.');
     return;
   }
+
+  const credentials = await getGatewayCredentials();
+  if (!credentials) return;
 
   // Get the current line where the cursor is
   const cursorLine = editor.selection.active.line;
@@ -270,7 +343,7 @@ async function handleDiffLlmSpecCommand(): Promise<void> {
   }, async (progress) => {
     try {
       progress.report({ message: 'Initializing Gemini spec analyzer...' });
-      const engine = new DiffLlmEngine();
+      const engine = new DiffLlmEngine(credentials.apiKey, credentials.baseUrl);
       
       progress.report({ message: 'Analyzing specification and generating Fast-Check arbitraries...' });
       progress.report({ message: 'Generating alternative AI implementations...' });

@@ -1,10 +1,11 @@
 import * as ts from 'typescript';
 import * as vm from 'node:vm';
-import * as vscode from 'vscode';
 import { GoogleGenerativeAI, SchemaType } from '@google/generative-ai';
 import fc from 'fast-check';
+
 export interface DiffLlmConfig {
   apiKey?: string;
+  baseUrl?: string;
   maxInputs?: number;
 }
 
@@ -20,22 +21,28 @@ export interface SpecDiscoveryResult {
   divergenceCount: number;
   divergentTests: DivergentTest[];
 }
+
 export class DiffLlmEngine {
   private genAI: GoogleGenerativeAI;
+  private baseUrl: string;
   private maxInputs: number;
-  constructor(config: DiffLlmConfig = {}) {
-    // Resolve the Gemini API key: setting first, then env variable
-    const apiKey = config.apiKey || 
-      vscode.workspace.getConfiguration('nanofuzz.ai').get<string>('apiKey') || 
-      process.env.GEMINI_API_KEY || '';
+  
+  constructor(apiKey: string, baseUrl: string, maxInputs?: number) {
     if (!apiKey) {
       throw new Error(
-        'Gemini API Key is missing. Please set it in NaNofuzz extension settings (nanofuzz.ai.apiKey) or export GEMINI_API_KEY in your environment.'
+        'AI Gateway API Key is missing. Please set your key using the Command Palette (NaNofuzz: Set Gemini API Key).'
+      );
+    }
+
+    if (!baseUrl) {
+      throw new Error(
+        'AI Gateway Base URL is missing. Please set your base URL using the Command Palette (NaNofuzz: Set Gemini API Key).'
       );
     }
     
     this.genAI = new GoogleGenerativeAI(apiKey);
-    this.maxInputs = config.maxInputs || 10000;
+    this.baseUrl = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
+    this.maxInputs = maxInputs || 10000;
   }
 
   /**
@@ -118,29 +125,33 @@ export class DiffLlmEngine {
   }
 
   private async planFromPrompt(userPrompt: string) {
-    const model = this.genAI.getGenerativeModel({
-      model: 'gemini-3.5-flash',
-      generationConfig: {
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: SchemaType.OBJECT,
-          properties: {
-            prompt: { type: SchemaType.STRING },
-            signature: {
-              type: SchemaType.OBJECT,
-              properties: {
-                name: { type: SchemaType.STRING },
-                params: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
-                return: { type: SchemaType.STRING }
+    const model = this.genAI.getGenerativeModel(
+      {
+        model: 'models/gemini/gemini-3.5-flash',
+        generationConfig: {
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: SchemaType.OBJECT,
+            properties: {
+              prompt: { type: SchemaType.STRING },
+              signature: {
+                type: SchemaType.OBJECT,
+                properties: {
+                  name: { type: SchemaType.STRING },
+                  params: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
+                  return: { type: SchemaType.STRING }
+                },
+                required: ["name", "params", "return"]
               },
-              required: ["name", "params", "return"]
+              interfaces: { type: SchemaType.STRING },
+              arbitrariesCode: { type: SchemaType.STRING }
             },
-            interfaces: { type: SchemaType.STRING },
-            arbitrariesCode: { type: SchemaType.STRING }
-          },
-          required: ["prompt", "signature", "interfaces", "arbitrariesCode"]
+            required: ["prompt", "signature", "interfaces", "arbitrariesCode"]
+          }
         }
-      }
+    },
+    { 
+      baseUrl: this.baseUrl
     });
     const systemInstruction = `
       You are an automated test-harness engineer.
@@ -184,7 +195,7 @@ export class DiffLlmEngine {
 
   private async planFromFunction(fnName: string, sourceCode: string) {
     const model = this.genAI.getGenerativeModel({
-      model: 'gemini-3.5-flash',
+      model: 'models/gemini/gemini-3.5-flash',
       generationConfig: {
         responseMimeType: 'application/json',
         responseSchema: {
@@ -205,6 +216,9 @@ export class DiffLlmEngine {
           required: ["signature", "interfaces", "arbitrariesCode"]
         }
       }
+    },
+    { 
+      baseUrl: this.baseUrl
     });
     const systemInstruction = `
       You are an automated test-harness engineer.
@@ -240,7 +254,7 @@ export class DiffLlmEngine {
 
   private async planFromSpecification(fnName: string, params: string[], specification: string) {
     const model = this.genAI.getGenerativeModel({
-      model: 'gemini-3.5-flash',
+      model: 'models/gemini/gemini-3.5-flash',
       generationConfig: {
         responseMimeType: 'application/json',
         responseSchema: {
@@ -262,6 +276,9 @@ export class DiffLlmEngine {
           required: ["prompt", "signature", "interfaces", "arbitrariesCode"]
         }
       }
+    },
+    { 
+      baseUrl: this.baseUrl
     });
     const systemInstruction = `
       You are an automated test-harness engineer.
@@ -314,8 +331,11 @@ export class DiffLlmEngine {
 
   private async generateImplementations(prompt: string, interfaces: string, count: number): Promise<string[]> {
     const model = this.genAI.getGenerativeModel({
-      model: 'gemini-3.5-flash',
+      model: 'models/gemini/gemini-3.5-flash',
       generationConfig: { responseMimeType: 'application/json' }
+    },
+    { 
+      baseUrl: this.baseUrl
     });
     const systemInstruction = `
       You are an expert testing generator.
@@ -337,8 +357,11 @@ export class DiffLlmEngine {
 
   private async generateAlternatives(fnName: string, originalSource: string, interfaces: string, count: number): Promise<string[]> {
     const model = this.genAI.getGenerativeModel({
-      model: 'gemini-3.5-flash',
+      model: 'models/gemini/gemini-3.5-flash',
       generationConfig: { responseMimeType: 'application/json' }
+    },
+    { 
+      baseUrl: this.baseUrl
     });
     const systemInstruction = `
       You are an expert testing generator.

@@ -62,6 +62,11 @@
         "command": "nanofuzz.diffLlmSpec",
         "title": "NaNofuzz: Generate from Specification",
         "category": "NaNofuzz"
+      },
+      {
+        "command": "nanofuzz.setGeminiApiKey",
+        "title": "Nanofuzz: Set Gemini API Key",
+        "category": "Nanofuzz"
       }
     ],
     "configuration": [
@@ -317,7 +322,7 @@
     "@babel/plugin-transform-modules-commonjs": "^7.27.1",
     "@babel/preset-typescript": "^7.27.1",
     "@babel/register": "^7.27.1",
-    "@eslint/js": "^10.0.1",
+    "@eslint/js": "^9.39.4",
     "@types/babel__core": "^7.20.5",
     "@types/istanbul-lib-hook": "^2.0.4",
     "@types/istanbul-lib-instrument": "^1.7.7",
