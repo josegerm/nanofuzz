@@ -3391,7 +3391,7 @@ export function provideCodeLenses(
     const fuzzValidators = vscode.workspace
       .getConfiguration("nanofuzz.ui.codeLens")
       .get("includeValidators");
-    const allFunctions = Object.values(program.getExportedFunctions());
+    const allFunctions = Object.values(program.getFunctions());
     const functions = (fuzzValidators === undefined ? true : fuzzValidators)
       ? allFunctions
       : allFunctions.filter((fn) => !fn.isValidator());

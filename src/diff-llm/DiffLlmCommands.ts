@@ -211,6 +211,7 @@ async function handleDiffLlmSpecCommand(): Promise<void> {
   // Look for a function definition near the cursor (search within 10 lines)
   let fnName: string | null = null;
   let params: string[] = [];
+  let displayParams: string[] = [];
   let jsDocComment: string | null = null;
   
   // Search upwards for JSDoc comment
@@ -236,16 +237,9 @@ async function handleDiffLlmSpecCommand(): Promise<void> {
         const fnMatch = defLine.match(/function\s+(\w+)\s*\((.*?)\)/);
         if (fnMatch) {
           fnName = fnMatch[1];
-          const paramStr = fnMatch[2].trim();
-          // Parse parameters - simple parsing that handles type annotations
-          if (paramStr) {
-            // Extract just the types (simple version)
-            const paramParts = paramStr.split(',').map(p => {
-              const match = p.trim().match(/:\s*(\w+|\w+\[\]|\{\s*[^}]*\})/);
-              return match ? match[1].trim() : p.trim().split(':')[0].trim();
-            });
-            params = paramParts.filter(p => p.length > 0);
-          }
+          const paramDefinitions = parseParameterDefinitions(fnMatch[2].trim());
+          params = paramDefinitions.map((param) => param.type);
+          displayParams = paramDefinitions.map((param) => `${param.name}: ${param.type}`);
           
           // Extract specification from JSDoc
           const jsDocText = docLines
@@ -263,75 +257,20 @@ async function handleDiffLlmSpecCommand(): Promise<void> {
     }
   }
   
-  // If we couldn't find a function with JSDoc, prompt the user
-  if (!fnName || !jsDocComment) {
-    // Prompt for function name
-    const manualFnName = await vscode.window.showInputBox({
-      prompt: 'Enter the function name',
-      placeHolder: 'e.g., calculateArea',
-      ignoreFocusOut: true,
-      value: fnName || ''
-    });
-    if (!manualFnName) {
-      return; // User cancelled
-    }
-    fnName = manualFnName;
+  if (!fnName) {
+    const inferred = inferFunctionMetadata(document, cursorLine);
+    fnName = inferred?.name ?? null;
+    params = inferred?.params ?? [];
+    displayParams = inferred?.displayParams ?? [];
+  }
 
-    // Prompt for parameter types
-    const paramsInput = await vscode.window.showInputBox({
-      prompt: 'Enter parameter types (comma-separated)',
-      placeHolder: 'e.g., Rectangle or number, string',
-      ignoreFocusOut: true
-    });
-    if (!paramsInput) {
-      return; // User cancelled
-    }
-    params = paramsInput.split(',').map(p => p.trim()).filter(p => p.length > 0);
+  if (!fnName) {
+    vscode.window.showErrorMessage('Could not infer a function from the current editor context.');
+    return;
+  }
 
-    // Prompt for JSDoc specification (multi-line)
-    const specDoc = await vscode.workspace.openTextDocument({
-      language: 'plaintext',
-      content: ''
-    });
-    const specEditor = await vscode.window.showTextDocument(specDoc, vscode.ViewColumn.Active);
-    specEditor.edit(editBuilder => {
-      editBuilder.insert(new vscode.Position(0, 0), 
-        'Enter the function specification here (what it should do).\n' +
-        'You can use multiple lines.\n' +
-        'When done, close this editor to continue.\n' +
-        '--- Specification below this line ---\n'
-      );
-    });
-    
-    // Wait for the editor to be closed
-    const closedSubscription = vscode.window.onDidChangeActiveTextEditor(() => {
-      // Just track when editor changes
-    });
-    
-    await new Promise<void>((resolve) => {
-      const checkInterval = setInterval(() => {
-        const allEditors = vscode.window.visibleTextEditors;
-        if (!allEditors.find(e => e.document === specDoc)) {
-          clearInterval(checkInterval);
-          closedSubscription.dispose();
-          resolve();
-        }
-      }, 100);
-    });
-    
-    let specification = specDoc.getText();
-    // Remove the instruction lines
-    const lines = specification.split('\n');
-    const specStartIndex = lines.findIndex(l => l.includes('--- Specification below this line ---'));
-    if (specStartIndex !== -1) {
-      specification = lines.slice(specStartIndex + 1).join('\n').trim();
-    }
-    
-    if (!specification) {
-      vscode.window.showErrorMessage('Function specification is required. Please provide a specification comment.');
-      return;
-    }
-    jsDocComment = specification;
+  if (!jsDocComment) {
+    jsDocComment = '';
   }
 
   const workspaceRoot = getWorkspaceRoot();
@@ -349,7 +288,13 @@ async function handleDiffLlmSpecCommand(): Promise<void> {
       progress.report({ message: 'Generating alternative AI implementations...' });
       progress.report({ message: 'Executing 10,000 differential fuzzing runs in V8 sandbox...' });
       
-      const result = await engine.runFromSpecification(fnName, params, jsDocComment, workspaceRoot);
+      const result = await engine.runFromSpecification(
+        fnName,
+        params,
+        jsDocComment || '',
+        workspaceRoot,
+        document.getText()
+      );
       
       progress.report({ message: 'Displaying results in side panel...' });
       
@@ -362,7 +307,7 @@ async function handleDiffLlmSpecCommand(): Promise<void> {
         { enableScripts: false }
       );
       
-      panel.webview.html = generateDiffLlmHtml(fnName, params, jsDocComment, result);
+      panel.webview.html = generateDiffLlmHtml(fnName, displayParams.length > 0 ? displayParams : params, jsDocComment, result);
       
       vscode.window.showInformationMessage(
         `Specification Analysis Completed! Results displayed in side panel.`
@@ -377,6 +322,51 @@ async function handleDiffLlmSpecCommand(): Promise<void> {
 /**
  * Generate HTML for DiffLlm results panel
  */
+function parseParameterDefinitions(parameterText: string): Array<{ name: string; type: string }> {
+  if (!parameterText) {
+    return [];
+  }
+
+  return parameterText
+    .split(',')
+    .map((param) => param.trim())
+    .filter(Boolean)
+    .map((param) => {
+      const match = param.match(/^([A-Za-z_$][\w$]*)\s*:\s*(.+)$/);
+      if (match) {
+        return { name: match[1], type: match[2].trim() };
+      }
+
+      const fallback = param.match(/^([A-Za-z_$][\w$]*)$/);
+      return { name: fallback?.[1] ?? 'arg', type: param.trim() };
+    });
+}
+
+function inferFunctionMetadata(document: vscode.TextDocument, cursorLine: number): { name: string; params: string[]; displayParams: string[] } | null {
+  const sourceText = document.getText();
+  const lineText = document.lineAt(Math.min(cursorLine, document.lineCount - 1)).text;
+  const functionMatch = sourceText.match(/function\s+(\w+)\s*\(([^)]*)\)/);
+  if (!functionMatch) {
+    const fallback = lineText.match(/(\w+)\s*\(([^)]*)\)/);
+    if (!fallback) {
+      return null;
+    }
+    const definitions = parseParameterDefinitions(fallback[2]);
+    return {
+      name: fallback[1],
+      params: definitions.map((param) => param.type),
+      displayParams: definitions.map((param) => `${param.name}: ${param.type}`)
+    };
+  }
+
+  const definitions = parseParameterDefinitions(functionMatch[2]);
+  return {
+    name: functionMatch[1],
+    params: definitions.map((param) => param.type),
+    displayParams: definitions.map((param) => `${param.name}: ${param.type}`)
+  };
+}
+
 function generateDiffLlmHtml(
   fnName: string,
   params: string[],
@@ -522,6 +512,29 @@ function generateDiffLlmHtml(
       text-align: center;
       padding: 20px;
     }
+    .code-block {
+      background: #252526;
+      border: 1px solid #3e3e42;
+      border-radius: 4px;
+      margin-bottom: 10px;
+      overflow: hidden;
+    }
+    .code-header {
+      background: #1e1e1e;
+      padding: 6px 8px;
+      border-bottom: 1px solid #3e3e42;
+      font-weight: 600;
+      color: #4fc3f7;
+    }
+    pre {
+      margin: 0;
+      padding: 10px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: 'Monaco', monospace;
+      font-size: 11px;
+      color: #ce9178;
+    }
   </style>
 </head>
 <body>
@@ -531,6 +544,15 @@ function generateDiffLlmHtml(
     <strong>Specification:</strong> ${escapeHtml(specification)}<br>
     <strong>Parameters:</strong> ${escapeHtml(params.join(', '))}
   </div>
+
+  <h2>Generated Implementations</h2>
+  ${result.implementations && result.implementations.length > 0
+    ? result.implementations.map((impl, index) => `
+      <div class="code-block">
+        <div class="code-header">Implementation ${index + 1}</div>
+        <pre>${escapeHtml(impl)}</pre>
+      </div>`).join('')
+    : '<div class="no-divergence">No generated implementations were returned.</div>'}
   
   <h2>Test Results</h2>
   <div class="metrics">
@@ -551,7 +573,7 @@ function generateDiffLlmHtml(
     All implementations behave identically.
   </div>`;
   } else {
-    html += `<h2>Divergent Test Cases (${Math.min(20, result.divergentTests.length)} of ${result.divergenceCount})</h2>`;
+    html += `<h2>Divergent Inputs (${result.divergentTests.length} unique case${result.divergentTests.length === 1 ? '' : 's'} from ${result.divergenceCount} divergence event${result.divergenceCount === 1 ? '' : 's'})</h2>`;
     
     result.divergentTests.forEach((test, index) => {
       const impl1Result = test.impl1.result;
@@ -569,7 +591,7 @@ function generateDiffLlmHtml(
       
       html += `
   <div class="test-case">
-    <div class="test-header">Test Case ${index + 1}</div>
+    <div class="test-header">${index + 1}. Observed ${test.failCount} time${test.failCount === 1 ? '' : 's'}</div>
     <div class="input-section">
       <div class="input-label">Input:</div>
       ${inputs.map(arg => `<div>${escapeHtml(formatValue(arg))}</div>`).join('')}

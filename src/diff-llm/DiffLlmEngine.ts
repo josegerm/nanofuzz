@@ -13,6 +13,7 @@ export interface DivergentTest {
   input: unknown[];
   impl1: { code: string; result: { status: string; value?: unknown; errorName?: string } };
   impl2: { code: string; result: { status: string; value?: unknown; errorName?: string } };
+  failCount: number;
 }
 
 export interface SpecDiscoveryResult {
@@ -20,6 +21,16 @@ export interface SpecDiscoveryResult {
   consensusCount: number;
   divergenceCount: number;
   divergentTests: DivergentTest[];
+  implementations?: string[];
+}
+
+interface ImplementationSignatureContext {
+  name: string;
+  params: string[];
+  returnType: string;
+  parameterNames?: string[];
+  specification?: string;
+  sourceCode?: string;
 }
 
 export class DiffLlmEngine {
@@ -52,8 +63,13 @@ export class DiffLlmEngine {
     // Step 1: Planning (infer signature & generate fast-check arbitraries)
     const plan = await this.planFromPrompt(userPrompt);
     
-    // Step 2: Generate 2 distinct implementations
-    const implementations = await this.generateImplementations(plan.prompt, plan.interfaces, 2);
+    // Step 2: Generate 2 distinct implementations from the prompt and inferred signature
+    const implementations = await this.generateImplementations(plan.prompt, plan.interfaces, 2, {
+      name: plan.signature.name,
+      params: plan.signature.params,
+      returnType: plan.signature.return,
+      specification: userPrompt
+    });
     
     // Step 3: Run differential testing
     const result = await this.executeDifferentialTesting(
@@ -66,6 +82,7 @@ export class DiffLlmEngine {
       workspaceRoot,
       false
     );
+    result.implementations = implementations;
     return result;
   }
 
@@ -80,12 +97,18 @@ export class DiffLlmEngine {
     const fullSource = fnSource;
     // Step 1: Planning for an existing function
     const plan = await this.planFromFunction(fnName, fullSource);
-    // Step 2: Generate 1 alternative implementation (total 2 including original)
-    const alternatives = await this.generateAlternatives(fnName, fullSource, plan.interfaces, 1);
-    const implementations = [fullSource, ...alternatives];
+    const parameterNames = this.extractParameterNames(fullSource, fnName);
+    // Step 2: Generate two new implementations and compare those directly
+    const implementations = await this.generateAlternatives(fnName, fullSource, plan.interfaces, 2, {
+      name: plan.signature.name || fnName,
+      params: plan.signature.params,
+      returnType: plan.signature.return,
+      parameterNames,
+      sourceCode: fullSource
+    });
     // Step 3: Run differential testing (original function is Implementation 1)
     const result = await this.executeDifferentialTesting(
-      fnName,
+      plan.signature.name || fnName,
       plan.signature.params,
       plan.signature.return,
       plan.interfaces,
@@ -94,6 +117,7 @@ export class DiffLlmEngine {
       workspaceRoot,
       true
     );
+    result.implementations = implementations;
     return result;
   }
 
@@ -104,23 +128,45 @@ export class DiffLlmEngine {
     fnName: string,
     params: string[],
     specification: string,
-    _workspaceRoot: string
+    workspaceRoot: string,
+    fnSource?: string
   ): Promise<SpecDiscoveryResult> {
-    // Step 1: Planning from specification
-    const plan = await this.planFromSpecification(fnName, params, specification);
+    let plan;
     
-    // Step 2: Generate 2 distinct implementations
-    const implementations = await this.generateImplementations(plan.prompt, plan.interfaces, 2);
+    // Fallback switch check
+    if (!specification || specification.trim().length === 0) {
+      if (!fnSource) {
+        throw new Error(`No specification comment found, and no underlying source code was provided for fallback analysis.`);
+      }
+      // Pivot directly to structural source analysis
+      plan = await this.planFromFunction(fnName, fnSource);
+    } else {
+      // Execute original specification mode planning
+      plan = await this.planFromSpecification(fnName, params, specification);
+    }
     
-    // Step 3: Run differential testing and return result directly (not file path)
+    // Step 2: Generate 2 distinct implementations from the specification or the supplied source
+    const implementations = await this.generateImplementations(plan.prompt, plan.interfaces, 2, {
+      name: plan.signature.name || fnName,
+      params: plan.signature.params,
+      returnType: plan.signature.return,
+      specification: specification && specification.trim().length > 0 ? specification : undefined,
+      sourceCode: fnSource,
+      parameterNames: fnSource ? this.extractParameterNames(fnSource, fnName) : undefined
+    });
+    
+    // Step 3: Run differential testing
     const result = await this.executeDifferentialTestingDirect(
-      fnName,
+      plan.signature.name || fnName,
       plan.signature.params,
       plan.signature.return,
       plan.interfaces,
       plan.arbitrariesCode,
       implementations
     );
+
+    // >>> REQ 2: Append implementations to payload so Webview can render them <<<
+    result.implementations = implementations;
     return result;
   }
 
@@ -329,7 +375,12 @@ export class DiffLlmEngine {
     return JSON.parse(result.response.text());
   }
 
-  private async generateImplementations(prompt: string, interfaces: string, count: number): Promise<string[]> {
+  private async generateImplementations(
+    prompt: string,
+    interfaces: string,
+    count: number,
+    signatureContext?: ImplementationSignatureContext
+  ): Promise<string[]> {
     const model = this.genAI.getGenerativeModel({
       model: 'models/gemini/gemini-3.5-flash',
       generationConfig: { responseMimeType: 'application/json' }
@@ -342,20 +393,27 @@ export class DiffLlmEngine {
       Generate exactly ${count} different implementations of this function in TypeScript. 
       
       CRITICAL RULES:
-      1. The functions must have the exact same signature, name, and parameters.
+      1. The functions must have the exact same signature, name, and parameters as the requested target.
       2. The functions MUST be 100% pure, deterministic, and side-effect free. 
       3. Do NOT use Math.random(), Date.now(), or mutate any external state or input arguments.
       4. They should differ ONLY in their internal logic, edge case handling, or performance optimizations.
       5. Do not include interface definitions in your code.
+      6. If a specification or source snippet is provided, implement directly from that source of truth instead of inventing behavior.
       
       Return ONLY a JSON array of strings, where each string is raw code.
     `;
-    const result = await model.generateContent(systemInstruction + '\n\nUser Prompt: ' + prompt);
-    const parsed = JSON.parse(result.response.text());
-    return parsed.map((code: string) => `${interfaces}\n${code}`);
+    const implementationPrompt = this.buildImplementationPrompt(prompt, signatureContext);
+    const result = await model.generateContent(systemInstruction + '\n\n' + implementationPrompt);
+    return this.parseImplementationResponse(result.response.text(), interfaces);
   }
 
-  private async generateAlternatives(fnName: string, originalSource: string, interfaces: string, count: number): Promise<string[]> {
+  private async generateAlternatives(
+    fnName: string,
+    originalSource: string,
+    interfaces: string,
+    count: number,
+    signatureContext?: ImplementationSignatureContext
+  ): Promise<string[]> {
     const model = this.genAI.getGenerativeModel({
       model: 'models/gemini/gemini-3.5-flash',
       generationConfig: { responseMimeType: 'application/json' }
@@ -365,19 +423,97 @@ export class DiffLlmEngine {
     });
     const systemInstruction = `
       You are an expert testing generator.
-      You will be given an existing TypeScript function named '${fnName}' and its source code.
+      You will be given an existing TypeScript function and its source code.
       Generate exactly ${count} ALTERNATIVE implementations of this function. 
       CRITICAL RULES:
       1. The alternatives must have the exact same signature, name, and parameters as the original.
       2. They MUST be 100% pure, deterministic, and side-effect free.
-      3. Try to capture different logical interpretations of the requirements, different edge-case handling policies (e.g. how they handle negative inputs, bounds, invalid dimensions, division by zero, empty collections), or optimization variations.
-      4. Do not include interface definitions in your code.
+      3. Use the supplied source of truth directly, especially the specification or implementation comments, and preserve the intended behavior.
+      4. Try to capture different logical interpretations of the requirements, different edge-case handling policies (e.g. how they handle negative inputs, bounds, invalid dimensions, division by zero, empty collections), or optimization variations.
+      5. Do not include interface definitions in your code.
       
       Return ONLY a JSON array of strings, where each string is raw code.
     `;
-    const result = await model.generateContent(`${systemInstruction}\n\nOriginal Code:\n${originalSource}`);
-    const parsed = JSON.parse(result.response.text());
-    return parsed.map((code: string) => `${interfaces}\n${code}`);
+    const implementationPrompt = this.buildImplementationPrompt(originalSource, signatureContext);
+    const result = await model.generateContent(`${systemInstruction}\n\n${implementationPrompt}`);
+    return this.parseImplementationResponse(result.response.text(), interfaces);
+  }
+
+  private parseImplementationResponse(rawText: string, interfaces: string): string[] {
+    const trimmed = rawText.trim();
+    const candidates = [trimmed];
+
+    const fencedMatch = trimmed.match(/```(?:ts|typescript)?\s*([\s\S]*?)```/i);
+    if (fencedMatch?.[1]) {
+      candidates.push(fencedMatch[1].trim());
+    }
+
+    for (const candidate of candidates) {
+      try {
+        const parsed = JSON.parse(candidate);
+        if (Array.isArray(parsed)) {
+          return parsed.map((code) => `${interfaces}\n${String(code)}`);
+        }
+        if (parsed && typeof parsed === 'object' && Array.isArray((parsed as { implementations?: unknown[] }).implementations)) {
+          return (parsed as { implementations: unknown[] }).implementations.map((code) => `${interfaces}\n${String(code)}`);
+        }
+      } catch {
+        // Try a simple fallback parse for bracketed arrays in plain text.
+      }
+    }
+
+    const arrayMatch = trimmed.match(/\[(.*?)\]/s);
+    if (arrayMatch?.[1]) {
+      const parts = arrayMatch[1]
+        .split(/","|','/)
+        .map((part) => part.replace(/^\s*["']|["']\s*$/g, '').trim())
+        .filter(Boolean);
+      if (parts.length > 0) {
+        return parts.map((code) => `${interfaces}\n${code}`);
+      }
+    }
+
+    return [trimmed].map((code) => `${interfaces}\n${code}`);
+  }
+
+  private buildImplementationPrompt(prompt: string, signatureContext?: ImplementationSignatureContext): string {
+    const lines: string[] = [];
+    lines.push('Target function request:');
+    lines.push(prompt);
+
+    if (signatureContext) {
+      const paramNames = signatureContext.parameterNames && signatureContext.parameterNames.length > 0
+        ? signatureContext.parameterNames
+        : signatureContext.params.map((_, index) => `arg${index + 1}`);
+      const signature = `${signatureContext.name}(${paramNames.map((name, index) => `${name}: ${signatureContext.params[index] || 'unknown'}`).join(', ')})${signatureContext.returnType ? `: ${signatureContext.returnType}` : ''}`;
+      lines.push(`Required signature: ${signature}`);
+
+      if (signatureContext.specification) {
+        lines.push('Implementation source of truth (specification/comment):');
+        lines.push(signatureContext.specification);
+      }
+
+      if (signatureContext.sourceCode) {
+        lines.push('Implementation source of truth (existing function):');
+        lines.push(signatureContext.sourceCode);
+      }
+    }
+
+    return lines.join('\n\n');
+  }
+
+  private extractParameterNames(sourceCode: string, targetFuncName: string): string[] {
+    const sourceFile = ts.createSourceFile('function.ts', sourceCode, ts.ScriptTarget.Latest, true);
+    let found: string[] = [];
+    const visit = (node: ts.Node): void => {
+      if (ts.isFunctionDeclaration(node) && node.name?.text === targetFuncName) {
+        found = node.parameters.map((param) => param.name.getText(sourceFile));
+        return;
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sourceFile);
+    return found;
   }
 
   private extractSignature(codeString: string, targetFuncName: string):
@@ -488,7 +624,6 @@ export class DiffLlmEngine {
     }
     const compiledFuncs = validGenerations.map(code => this.compileInSandbox(code, funcName));
     const dynamicArbitraries = this.loadArbitraries(arbitrariesCode);
-    // Bypass property runner and sample raw inputs
     const combinedArbitrary = fc.tuple(...dynamicArbitraries);
     const testInputs = fc.sample(combinedArbitrary, { numRuns: this.maxInputs, seed: Date.now() });
     const report: SpecDiscoveryResult = {
@@ -497,8 +632,8 @@ export class DiffLlmEngine {
       divergenceCount: 0,
       divergentTests: []
     };
-    
-    // Evaluate all test inputs
+    const divergentByInput = new Map<string, DivergentTest>();
+
     for (const args of testInputs) {
       const results = compiledFuncs.map(fn => this.executeSafely(fn, args));
       const baseline = JSON.stringify(results[0]);
@@ -508,25 +643,31 @@ export class DiffLlmEngine {
         continue;
       }
       report.divergenceCount++;
-      
-      // Record divergent test (only keep first 20 divergent tests to avoid bloat)
-      if (report.divergentTests.length < 20) {
-        const impl1Code = validGenerations[0].substring(validGenerations[0].indexOf('function ')).trim();
-        const impl2Code = validGenerations[1].substring(validGenerations[1].indexOf('function ')).trim();
-        
-        report.divergentTests.push({
-          input: args,
-          impl1: {
-            code: impl1Code,
-            result: results[0]
-          },
-          impl2: {
-            code: impl2Code,
-            result: results[1]
-          }
-        });
+
+      const inputKey = this.createStableInputKey(args);
+      const existing = divergentByInput.get(inputKey);
+      if (existing) {
+        existing.failCount += 1;
+        continue;
       }
+
+      const impl1Code = validGenerations[0].trim();
+      const impl2Code = validGenerations[1].trim();
+      divergentByInput.set(inputKey, {
+        input: args,
+        impl1: {
+          code: impl1Code,
+          result: results[0]
+        },
+        impl2: {
+          code: impl2Code,
+          result: results[1]
+        },
+        failCount: 1
+      });
     }
+
+    report.divergentTests = Array.from(divergentByInput.values()).sort((a, b) => b.failCount - a.failCount);
     return report;
   }
 
@@ -549,7 +690,6 @@ export class DiffLlmEngine {
     }
     const compiledFuncs = validGenerations.map(code => this.compileInSandbox(code, funcName));
     const dynamicArbitraries = this.loadArbitraries(arbitrariesCode);
-    // Bypass property runner and sample raw inputs
     const combinedArbitrary = fc.tuple(...dynamicArbitraries);
     const testInputs = fc.sample(combinedArbitrary, { numRuns: this.maxInputs, seed: Date.now() });
     const report: SpecDiscoveryResult = {
@@ -558,8 +698,8 @@ export class DiffLlmEngine {
       divergenceCount: 0,
       divergentTests: []
     };
-    
-    // Evaluate all test inputs
+    const divergentByInput = new Map<string, DivergentTest>();
+
     for (const args of testInputs) {
       const results = compiledFuncs.map(fn => this.executeSafely(fn, args));
       const baseline = JSON.stringify(results[0]);
@@ -569,26 +709,53 @@ export class DiffLlmEngine {
         continue;
       }
       report.divergenceCount++;
-      
-      // Record divergent test (only keep first 20 divergent tests to avoid bloat)
-      if (report.divergentTests.length < 20) {
-        const impl1Code = validGenerations[0].substring(validGenerations[0].indexOf('function ')).trim();
-        const impl2Code = validGenerations[1].substring(validGenerations[1].indexOf('function ')).trim();
-        
-        report.divergentTests.push({
-          input: args,
-          impl1: {
-            code: impl1Code,
-            result: results[0]
-          },
-          impl2: {
-            code: impl2Code,
-            result: results[1]
-          }
-        });
+
+      const inputKey = this.createStableInputKey(args);
+      const existing = divergentByInput.get(inputKey);
+      if (existing) {
+        existing.failCount += 1;
+        continue;
       }
+
+      const impl1Code = validGenerations[0].trim();
+      const impl2Code = validGenerations[1].trim();
+      divergentByInput.set(inputKey, {
+        input: args,
+        impl1: {
+          code: impl1Code,
+          result: results[0]
+        },
+        impl2: {
+          code: impl2Code,
+          result: results[1]
+        },
+        failCount: 1
+      });
     }
+
+    report.divergentTests = Array.from(divergentByInput.values()).sort((a, b) => b.failCount - a.failCount);
     return report;
+  }
+
+  private createStableInputKey(input: unknown[]): string {
+    return JSON.stringify(this.normalizeForStableKey(input));
+  }
+
+  private normalizeForStableKey(value: unknown): unknown {
+    if (Array.isArray(value)) {
+      return value.map((item) => this.normalizeForStableKey(item));
+    }
+
+    if (value !== null && typeof value === 'object') {
+      return Object.keys(value as Record<string, unknown>)
+        .sort()
+        .reduce<Record<string, unknown>>((acc, key) => {
+          acc[key] = this.normalizeForStableKey((value as Record<string, unknown>)[key]);
+          return acc;
+        }, {});
+    }
+
+    return value;
   }
 }
 
